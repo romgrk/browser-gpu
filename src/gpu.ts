@@ -1,3 +1,7 @@
+/**
+ * Setup a webgl program that takes as input an `W * H` wide uint32 array
+ * and outputs an array of the same dimension, after running a shader on it.
+ */
 export function setup(canvas = document.createElement('canvas')) {
   const maybeGl = canvas.getContext('webgl2');
   if (!maybeGl)
@@ -101,7 +105,7 @@ export function setup(canvas = document.createElement('canvas')) {
   let width = 0
   let height = 0
 
-  function setDimensions(w = 100, h = 100) {
+  function setDimensions(w: number, h: number) {
     width = w;
     height = h;
 
@@ -159,20 +163,11 @@ export function setup(canvas = document.createElement('canvas')) {
     return pixels
   }
 
-  // Input & run
-
-  const start = performance.now()
-
-  setDimensions(100, 100)
-  setData()
-
-  const pixels = compute()
-
-  const end = performance.now()
-
-  console.log(end - start)
-
-  return Array.from(pixels)
+  return {
+    setDimensions,
+    setData,
+    compute,
+  }
 }
 
 function createProgram(gl: WebGL2RenderingContext, vsSource: string, fsSource: string) {
@@ -228,4 +223,3 @@ function identity(template: TemplateStringsArray, ...args: any[]) {
   }
   return string + template[template.length - 1]
 }
-
