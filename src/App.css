@@ -11,4 +11,9 @@
 .output {
   width: 100%;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.canvas {
+  border: 1px solid rgba(255 255 255 / 0.2);
 }

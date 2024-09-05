@@ -1,22 +1,4 @@
-// Just for syntax highlighting
-const glsl = identity
-function identity(template: TemplateStringsArray, ...args: any[]) {
-    let string = ''
-    for (let i = 0; i < args.length; i++) {
-        string += template[i] + String(args[i])
-    }
-    return string + template[template.length - 1]
-}
-
-const canvas = document.createElement('canvas');
-
-export function test() {
-  const width = 1024;
-  const height = 1024;
-
-  canvas.width  = width;
-  canvas.height = height;
-
+export function setup(canvas = document.createElement('canvas')) {
   const maybeGl = canvas.getContext('webgl2');
   if (!maybeGl)
     throw new Error('webgl2_required');
@@ -47,7 +29,21 @@ export function test() {
     out vec4 outputVector;
 
     uniform uvec4 dimensions;
-    uniform sampler2D u_data;
+    uniform sampler2D inputData;
+
+    uint PRIME = 16777619u;
+    uint OFFSET = 2166136261u;
+
+    uint fnv1a(uint data) {
+      uint h = OFFSET;
+
+      for (uint i = 0u; i < 4u; i++) {
+        h = h ^ ((data >> (i * 8u)) & 0xffu);
+        h = h * PRIME;
+      }
+
+      return h;
+    }
 
     void main() {
       uint width  = (dimensions[1] << 8) | (dimensions[0] << 0);
@@ -60,18 +56,26 @@ export function test() {
       );
 
       uint index = position.x + position.y * width;
-      vec4 data = texture(u_data, zeroToOne);
+      vec4 data = texture(inputData, zeroToOne);
+
+      uint value =
+        (uint(data[0] * 255.0) << 24) |
+        (uint(data[1] * 255.0) << 16) |
+        (uint(data[2] * 255.0) <<  8) |
+        (uint(data[3] * 255.0) <<  0);
+
+      value = fnv1a(index);
 
       outputVector = vec4(
-        data[0],
-        data[1],
-        data[2],
-        data[3]
+        float((value >> 24) & 0xffu) / 255.0,
+        float((value >> 16) & 0xffu) / 255.0,
+        float((value >>  8) & 0xffu) / 255.0,
+        float((value >>  0) & 0xffu) / 255.0
       );
     }
   `;
 
-  const program = setup(gl, vsSource, fsSource)
+  const program = createProgram(gl, vsSource, fsSource)
 
   // Construct simple 2D geometry
   const triangleArray = gl.createVertexArray();
@@ -79,12 +83,8 @@ export function test() {
 
   // Vertex Positions, 2 triangles
   const positions = new Float32Array([
-    -1, -1,
-    -1,  1,
-     1,  1,
-     1, -1,
-     1,  1,
-    -1, -1,
+    -1, -1, -1,  1,  1,  1,
+     1, -1,  1,  1, -1, -1,
   ]);
   const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -95,54 +95,78 @@ export function test() {
   const dimensionsLocation = gl.getUniformLocation(program, 'dimensions');
   const dimensionsBytes = new Uint8Array(4);
   const dimensions = new Uint16Array(dimensionsBytes.buffer)
-  dimensions[0] = gl.drawingBufferWidth
-  dimensions[1] = gl.drawingBufferHeight
 
-  const dataLocation = gl.getUniformLocation(program, 'u_data');
-  const dataBytes = new Uint8Array(
-    Array.from({ length: width * height * 4 })
-      .map((_, index) => index)
-  );
-  const dataTextureUnit = 0
+  const dataLocation = gl.getUniformLocation(program, 'inputData');
 
-  const texture = gl.createTexture()
-  gl.activeTexture(gl.TEXTURE0 + dataTextureUnit)
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.RGBA,
-    width, height, 0,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    dataBytes,
-  );
+  let width = 0
+  let height = 0
 
+  function setDimensions(w = 100, h = 100) {
+    width = w;
+    height = h;
+
+    canvas.width  = width;
+    canvas.height = height;
+
+    dimensions[0] = gl.drawingBufferWidth
+    dimensions[1] = gl.drawingBufferHeight
+
+    gl.viewport(0, 0, width, height)
+    gl.uniform4uiv(dimensionsLocation, Array.from(dimensionsBytes));
+  }
+
+  function setData(inputData?: Uint8Array) {
+    const dataBytes = inputData ?? new Uint8Array(
+      Array.from({ length: width * height * 4 })
+        .map((_, index) => index)
+    );
+    const dataTextureUnit = 0
+    const texture = gl.createTexture()
+    gl.activeTexture(gl.TEXTURE0 + dataTextureUnit)
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      width, height, 0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      dataBytes,
+    );
+
+    gl.uniform1i(dataLocation, dataTextureUnit)
+  }
+
+  function compute() {
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    const pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+    gl.readPixels(
+      0,
+      0,
+      gl.drawingBufferWidth,
+      gl.drawingBufferHeight,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixels
+    );
+
+    return pixels
+  }
 
   // Input & run
 
   const start = performance.now()
 
-  gl.uniform4uiv(dimensionsLocation, Array.from(dimensionsBytes));
-  gl.uniform1i(dataLocation, dataTextureUnit)
+  setDimensions(100, 100)
+  setData()
 
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-  const pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
-  gl.readPixels(
-    0,
-    0,
-    gl.drawingBufferWidth,
-    gl.drawingBufferHeight,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    pixels
-  );
+  const pixels = compute()
 
   const end = performance.now()
 
@@ -151,7 +175,7 @@ export function test() {
   return Array.from(pixels)
 }
 
-function setup(gl: WebGL2RenderingContext, vsSource: string, fsSource: string) {
+function createProgram(gl: WebGL2RenderingContext, vsSource: string, fsSource: string) {
   const vertexShader = gl.createShader(gl.VERTEX_SHADER);
   if (!vertexShader) {
     throw new Error('Could not create vertex shader');
@@ -191,3 +215,17 @@ function setup(gl: WebGL2RenderingContext, vsSource: string, fsSource: string) {
 
   return program
 }
+
+// Just for syntax highlighting
+function glsl(...args: any[]) {
+  // @ts-ignore
+  return identity(...args)
+}
+function identity(template: TemplateStringsArray, ...args: any[]) {
+  let string = ''
+  for (let i = 0; i < args.length; i++) {
+    string += template[i] + String(args[i])
+  }
+  return string + template[template.length - 1]
+}
+
