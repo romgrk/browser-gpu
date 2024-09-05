@@ -1,6 +1,12 @@
 /**
  * Setup a webgl program that takes as input an `W * H` wide uint32 array
  * and outputs an array of the same dimension, after running a shader on it.
+ *
+ * @usage
+ *   const gpu = setup()
+ *   gpu.setDimensions(100, 100)
+ *   gpu.setData()
+ *   output = gpu.compute()
  */
 export function setup(canvas = document.createElement('canvas')) {
   const maybeGl = canvas.getContext('webgl2');
@@ -11,7 +17,7 @@ export function setup(canvas = document.createElement('canvas')) {
 
   gl.clearColor(0, 0, 0, 0);
 
-  // Vertext Shader
+  // Vertex Shader
   const vsSource = glsl`#version 300 es
     precision highp float;
     layout (location=0) in vec4 position;
@@ -63,12 +69,16 @@ export function setup(canvas = document.createElement('canvas')) {
       vec4 data = texture(inputData, zeroToOne);
 
       uint value =
-        (uint(data[0] * 255.0) << 24) |
-        (uint(data[1] * 255.0) << 16) |
-        (uint(data[2] * 255.0) <<  8) |
-        (uint(data[3] * 255.0) <<  0);
+        (uint(data[3] * 255.0) << 24) |
+        (uint(data[2] * 255.0) << 16) |
+        (uint(data[1] * 255.0) <<  8) |
+        (uint(data[0] * 255.0) <<  0);
 
-      value = fnv1a(index);
+      /* Start of transform code */
+
+      value = fnv1a(value);
+
+      /* End of transform code */
 
       outputVector = vec4(
         float((value >> 24) & 0xffu) / 255.0,
@@ -119,11 +129,12 @@ export function setup(canvas = document.createElement('canvas')) {
     gl.uniform4uiv(dimensionsLocation, Array.from(dimensionsBytes));
   }
 
-  function setData(inputData?: Uint8Array) {
-    const dataBytes = inputData ?? new Uint8Array(
-      Array.from({ length: width * height * 4 })
+  function setData(inputData?: Uint32Array) {
+    const data = inputData ?? new Uint32Array(
+      Array.from({ length: width * height })
         .map((_, index) => index)
     );
+    const dataBytes = new Uint8Array(data.buffer);
     const dataTextureUnit = 0
     const texture = gl.createTexture()
     gl.activeTexture(gl.TEXTURE0 + dataTextureUnit)
